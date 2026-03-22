@@ -13,6 +13,9 @@
 --   Windows positioned in the same zone (same state + screen) are stacked.
 --   Background windows peek with a small offset. Cycle with Ctrl+Option+Tab.
 
+-- Disable window move/resize animation for instant response
+hs.window.animationDuration = 0
+
 -- ============================================================
 -- Position tables
 -- ============================================================
@@ -171,45 +174,40 @@ local function applyPeekOffsets(zoneKey)
     local windows = zoneWindows[zoneKey]
     local count = #windows
 
-    -- 1. Set all frames (back windows are taller, front is shortest)
+    -- Resolve all window objects once
+    local resolved = {}
     for i, winId in ipairs(windows) do
         local win = hs.window.get(winId)
-        local state = winState[winId]
-        if win and state then
-            local layer = i - 1
-            local inset = (count - 1 - layer) * PEEK_PX
-            applyFrame(win, state, nil, inset)
+        if win and winState[winId] then
+            resolved[i] = win
         end
+    end
+
+    -- 1. Set all frames (back windows are taller, front is shortest)
+    for i, win in pairs(resolved) do
+        local layer = i - 1
+        local inset = (count - 1 - layer) * PEEK_PX
+        applyFrame(win, winState[windows[i]], nil, inset)
     end
 
     -- 2. Raise background windows back-to-front for correct z-ordering.
-    --    raise() orders windows within the same app without triggering
-    --    macOS app-level activation (which would group same-app windows).
     for i = count, 2, -1 do
-        local win = hs.window.get(windows[i])
-        if win then
-            win:raise()
-        end
+        if resolved[i] then resolved[i]:raise() end
     end
 
     -- 3. Focus only the front window (activates it and puts it on top).
-    local frontWin = hs.window.get(windows[1])
-    if frontWin then
-        frontWin:focus()
-    end
+    if resolved[1] then resolved[1]:focus() end
 end
 
 -- Handle zone transition after state change. Call this instead of applyFrame directly.
 -- targetScreen is only needed for monitor overflow (to move window before zone calc).
 local function finishMove(win, state, oldZone, targetScreen)
-    -- For monitor overflow, move window to target screen first
+    -- For monitor overflow, move window to target screen so win:screen() is correct
     if targetScreen then
-        applyFrame(win, state, targetScreen)
+        win:moveToScreen(targetScreen, false, false, 0)
     end
 
-    -- Compute new zone using the screen the window is now on
-    local screen = targetScreen or win:screen()
-    local screenID = screen:id()
+    local screenID = (targetScreen or win:screen()):id()
     local newZone = getZoneKey(state, screenID)
 
     -- Update zone registry
